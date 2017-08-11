@@ -1,0 +1,226 @@
+var documentShow = function (){
+  var resources = doc.resources
+
+  if (resources && resources.length > 0) {
+    loadResources(resources, function (){
+      initDocument();
+    })
+  } else {
+    initDocument();
+  }  
+}
+
+var loadedResources = []
+
+// Function copy from finch 
+function loadResources(srcResources, callback) {
+  var resources = (_.isArray(srcResources) ? srcResources : [srcResources]).slice(0),
+      callbackDone = false
+      loadingResources = []
+  
+  //$.ajaxSetup({async: false})
+  
+  for (var i = 0; i < resources.length; i++) {
+    var r = resources[i]
+    if (_.indexOf(loadedResources, r.name) === -1) {
+      if (r.type === 'css') {
+        var name = r.name
+        if (r.uri.toLowerCase().indexOf('flatly') === -1 && r.uri.toLowerCase().indexOf('vida') === -1) {
+          loadingResources.push(name)
+        }
+      } else if (r.type === 'js') {
+        var name = r.name
+        // Do not load jquery & bootstrap
+        if (r.uri.toLowerCase().indexOf('jquery') === -1 || r.uri.toLowerCase().indexOf('jquery-ui') !== -1) {
+          loadingResources.push(name)
+        }
+      }
+    }
+  }
+  
+  function runLoad() {
+    if (resources.length > 0) {
+      var r = resources.pop()
+
+      if (_.indexOf(loadedResources, r.name) === -1) {
+        if (r.type === 'css') {
+          var name = r.name
+          if (r.uri.toLowerCase().indexOf('flatly') === -1 && r.uri.toLowerCase().indexOf('vida') === -1) {
+            runGetCSS(name, r.uri, function() {
+              runLoad()
+            })
+          } else {
+            runCallback()
+            if (!callbackDone) {
+              runLoad()
+            }
+          }
+        } else if (r.type === 'js') {
+          var name = r.name
+          // Do not load jquery & bootstrap
+          if (r.uri.toLowerCase().indexOf('jquery') === -1 || r.uri.toLowerCase().indexOf('jquery-ui') !== -1) {
+            runGetScript(name, r.uri, function() {
+              runLoad()
+            })
+          } else {
+            runCallback()
+            if (!callbackDone) {
+              runLoad()
+            }
+          }
+        }
+      } else {
+        runCallback()
+        if (!callbackDone) {
+          runLoad()
+        }
+      }
+    } else {
+      runCallback()
+    }
+  }
+  
+  function runGetCSS(name, uri, callback) {
+    $.ajax({
+        url: uri,
+        success:function(data){
+          if (data.indexOf('<html>') === -1) {
+            loadedResources.push(name)
+            $("<style data-resource='" + name + "'></style>").appendTo("head").html(data);
+          
+            callback()
+          
+          } else {
+            message.add('Failed to load resouce: ' + name, {type: 'error'})
+          }              
+        }
+    })
+  }
+  
+  function runGetScript(name, uri, callback) {
+    $.getScript(uri)
+      .done(function (script, st, jqxhr){
+        loadedResources.push(name)
+        
+        callback()
+        
+      })
+      .fail(function (){
+        message.add('Failed to load resouce: ' + name, {type: 'error'})
+      })
+  }
+  
+  function runCallback() {
+    var diff = _.difference( loadingResources, _.intersection(loadedResources, loadingResources) )
+    if (diff.length === 0 && !callbackDone && callback) {
+      callbackDone = true
+      callback()
+    }
+  }
+  
+  runLoad()
+}
+
+function initDocument() {
+  var javascript = doc.javascript,
+      css = doc.css,
+      properties = doc.properties || [],
+      config = {},
+      canvas = $("#canvas").append(doc.html ? doc.html.replace(/<\\\//g, '<\/') : ''),
+      data = dataTextToJSON(doc.dataText).data;
+  
+  createCanvasStyle(doc.stylesheet)
+  
+  if (properties.length > 0) {
+    properties.forEach(function (p) {
+      config[p.name] = p.value
+    })
+  } 
+     
+  if (javascript.indexOf('drawD3Document') !== -1) {
+    eval(javascript)    
+    if (typeof(drawD3Document) !== 'undefined') {
+      drawD3Document( data )
+    }    
+  } else {
+    javascript = '(function (data, config) {' + javascript + '})( data, config )'
+    eval(javascript)
+  }
+  
+  $('#embed-code').width(window.innerWidth / 2)
+  
+  $('.embed-widget-toggle').click(function (){
+    if (this.tagName !== 'INPUT') {
+      if ($('#embed-code').val().length === 0) {
+        $('#embed-code').val( getEmbedCode() )
+      }
+      $('.embed-widget-toggle').toggle()
+    }
+  })
+  
+  $('input.embed-widget-toggle').click(function (){
+    this.select()
+  })
+  
+  var responsiveRetry = 0
+  function handleResponsive() {
+    // handle responsive layout
+    var svg = d3.selectAll("#canvas svg")
+    
+    if (svg[0].length > 0 && responsiveRetry < 10) {
+      function resizeViewbox() {
+        svg[0].forEach(function(s) {
+          var targetWidth = $(s.parentNode).width()
+        
+          var svgWidth = d3.select(s).attr("width"),
+              svgHeight = d3.select(s).attr("height")
+          var aspect = svgWidth / svgHeight
+
+          if (svgWidth > targetWidth) {
+            d3.select(s).attr("width", targetWidth)
+            d3.select(s).attr("height", targetWidth / aspect)
+          }
+        })
+      }
+    
+      if (!svg.attr("viewBox")) {
+        svg[0].forEach(function(s) {
+          var svgWidth = d3.select(s).attr("width"),
+              svgHeight = d3.select(s).attr("height")
+      
+          d3.select(s).attr("viewBox", "0 0 " + svgWidth + " " + svgHeight)
+          d3.select(s).attr("preserveAspectRatio", "xMidYMid")
+        })
+
+        $(window).on("resize", function() {
+            resizeViewbox()
+        })
+
+        resizeViewbox()
+      }
+    } else {
+      setTimeout(function() {
+        responsiveRetry++
+        handleResponsive()
+      }, 100)
+    }
+  }
+  
+  handleResponsive()
+}
+
+function insertScriptBlock(js){
+  var $script = $('<script type="text/javascript">' + js + '</script>')
+  $('body').append($script)
+}
+
+function getEmbedCode(){
+  var $svg = $("#canvas svg"),
+      width =  $svg.width() || 800,
+      height = $svg.height() || 450,
+      embedCode = '<iframe src="' + 'http://embed.vida.io/documents/' + doc._id + 
+                  '" width="' + (parseInt(width) + 0) + 
+                  '" height="' + (parseInt(height) + 25) + 
+                  '" seamless frameBorder="0" scrolling="no"></iframe>'
+  return embedCode
+}

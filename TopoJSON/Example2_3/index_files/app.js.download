@@ -1,0 +1,7 @@
+documentReady(function (){
+  if (typeof doc !== 'undefined') {
+    documentShow()
+  } else if (typeof chart !== 'undefined' && typeof dataset !== 'undefined') {
+    chartShow()
+  }
+})
